@@ -683,6 +683,14 @@ mod platform {
             self.push_profile_update();
         }
 
+        fn set_shift_button(&mut self, button: Option<u32>) {
+            if let Some(profile) = self.current_profile.as_mut() {
+                profile.shift_button = button;
+            }
+
+            self.push_profile_update();
+        }
+
         fn push_profile_update(&mut self) {
             if let Ok(mut guard) = self.mapping.lock() {
                 guard.profile = self.current_profile.clone();
@@ -1041,6 +1049,47 @@ mod platform {
 
                 ui.label("ms per repeat");
             });
+
+            ui.horizontal(|ui| {
+                let current_shift = self
+                    .current_profile
+                    .as_ref()
+                    .and_then(|profile| profile.shift_button);
+                let mut selected_shift = current_shift;
+
+                ui.label("Shift button:");
+
+                egui::ComboBox::from_id_salt("shift_button")
+                    .selected_text(
+                        current_shift
+                            .and_then(opends_core::types::pad::button_name)
+                            .unwrap_or("None"),
+                    )
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut selected_shift, None, "None");
+
+                        for (mask, name) in opends_core::types::pad::ALL_BUTTONS {
+                            ui.selectable_value(&mut selected_shift, Some(*mask), *name);
+                        }
+                    });
+
+                if selected_shift != current_shift {
+                    self.set_shift_button(selected_shift);
+                }
+            });
+
+            if self
+                .current_profile
+                .as_ref()
+                .and_then(|profile| profile.shift_button)
+                .is_some()
+            {
+                ui.label(theme::muted(
+                    "Holding the shift button gives every bound button a second, \
+                     alternate action. Edit shift_bindings in the profile JSON by hand \
+                     for now, there is no row editor for it yet.",
+                ));
+            }
 
             ui.add_space(10.0);
 

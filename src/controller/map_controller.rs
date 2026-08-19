@@ -39,6 +39,7 @@ pub struct MapController {
     touch_baseline: Option<(u16, u16)>,
     pending_macro: Option<PendingMacro>,
     turbo_state: HashMap<ButtonMask, TurboTrack>,
+    shift_layer: HashMap<ButtonMask, bool>,
 }
 
 impl MapController {
@@ -49,6 +50,7 @@ impl MapController {
             touch_baseline: None,
             pending_macro: None,
             turbo_state: HashMap::new(),
+            shift_layer: HashMap::new(),
         }
     }
 
@@ -60,8 +62,36 @@ impl MapController {
         self.emitted
     }
 
-    pub fn outputs_for(&self, update: &Update) -> Vec<Output> {
-        mapping::outputs_for(&self.profile, update.pressed, update.released)
+    pub fn outputs_for(&mut self, update: &Update) -> Vec<Output> {
+        let mut outputs = Vec::new();
+
+        let shift_active = self
+            .profile
+            .shift_button
+            .map(|mask| update.state.buttons & mask != 0)
+            .unwrap_or(false);
+
+        for (mask, _) in ALL_BUTTONS {
+            if update.released & mask != 0 {
+                let used_shift = self.shift_layer.remove(mask).unwrap_or(false);
+
+                if let Some(binding) = self.profile.shift_binding_for(*mask, used_shift) {
+                    mapping::push_release_binding(binding, &mut outputs);
+                }
+            }
+        }
+
+        for (mask, _) in ALL_BUTTONS {
+            if update.pressed & mask != 0 {
+                self.shift_layer.insert(*mask, shift_active);
+
+                if let Some(binding) = self.profile.shift_binding_for(*mask, shift_active) {
+                    mapping::push_press_binding(binding, &mut outputs);
+                }
+            }
+        }
+
+        outputs
     }
 
     pub fn apply(&mut self, update: &Update, kbm: &mut dyn KeyboardMouse) -> usize {
@@ -203,7 +233,17 @@ impl MapController {
         held: &PadState,
         kbm: &mut dyn KeyboardMouse,
     ) -> usize {
-        let mut releases = mapping::outputs_to_release(&self.profile, held);
+        let mut releases = Vec::new();
+
+        for (mask, _) in ALL_BUTTONS {
+            if held.buttons & mask != 0 {
+                let used_shift = self.shift_layer.get(mask).copied().unwrap_or(false);
+
+                if let Some(binding) = self.profile.shift_binding_for(*mask, used_shift) {
+                    mapping::push_release_binding(binding, &mut releases);
+                }
+            }
+        }
 
         if let Some(pending) = self.pending_macro.take() {
             for step in &pending.steps[..pending.fired_count] {
@@ -212,6 +252,7 @@ impl MapController {
         }
 
         self.turbo_state.clear();
+        self.shift_layer.clear();
         self.profile = next;
 
         if releases.is_empty() {
@@ -596,6 +637,124 @@ mod tests {
             ),
             2
         );
+    }
+
+    fn shift_profile() -> Profile {
+        Profile::named("shift")
+            .with_shift_button(CIRCLE)
+            .bind("Cross", Binding::Key { code: SPACE })
+            .bind_shift("Cross", Binding::Key { code: ESCAPE })
+    }
+
+    #[test]
+    fn pressing_a_bound_button_while_holding_shift_fires_the_shift_binding() {
+        let mut controller = MapController::new(shift_profile());
+        let mut kbm = MockKeyboardMouse::new();
+
+        kbm.expect_emit()
+            .withf(|outputs| {
+                outputs.contains(&Output::KeyDown(ESCAPE))
+                    && !outputs.contains(&Output::KeyDown(SPACE))
+            })
+            .times(1)
+            .returning(|outputs| outputs.len());
+
+        controller.apply(&update(CIRCLE | CROSS, 0), &mut kbm);
+    }
+
+    #[test]
+    fn pressing_a_bound_button_without_shift_fires_the_primary_binding() {
+        let mut controller = MapController::new(shift_profile());
+        let mut kbm = MockKeyboardMouse::new();
+
+        kbm.expect_emit()
+            .withf(|outputs| outputs == [Output::KeyDown(SPACE)])
+            .times(1)
+            .returning(|outputs| outputs.len());
+
+        controller.apply(&update(CROSS, 0), &mut kbm);
+    }
+
+    #[test]
+    fn a_button_with_no_shift_binding_still_fires_its_primary_binding_while_shifted() {
+        let profile = Profile::named("shift")
+            .with_shift_button(CIRCLE)
+            .bind("Cross", Binding::Key { code: SPACE });
+        let mut controller = MapController::new(profile);
+        let mut kbm = MockKeyboardMouse::new();
+
+        kbm.expect_emit()
+            .withf(|outputs| outputs.contains(&Output::KeyDown(SPACE)))
+            .times(1)
+            .returning(|outputs| outputs.len());
+
+        controller.apply(&update(CIRCLE | CROSS, 0), &mut kbm);
+    }
+
+    #[test]
+    fn releasing_a_button_uses_the_layer_it_was_pressed_under_even_after_shift_is_released() {
+        let mut controller = MapController::new(shift_profile());
+        let mut kbm = MockKeyboardMouse::new();
+        kbm.expect_emit().returning(|outputs| outputs.len());
+
+        controller.apply(&update(CIRCLE | CROSS, 0), &mut kbm);
+
+        let mut circle_released_cross_still_held = update(0, CIRCLE);
+        circle_released_cross_still_held.state.buttons = CROSS;
+        controller.apply(&circle_released_cross_still_held, &mut kbm);
+
+        drop(kbm);
+        let mut kbm = MockKeyboardMouse::new();
+        kbm.expect_emit()
+            .withf(|outputs| outputs == [Output::KeyUp(ESCAPE)])
+            .times(1)
+            .returning(|outputs| outputs.len());
+
+        controller.apply(&update(0, CROSS), &mut kbm);
+    }
+
+    #[test]
+    fn swapping_profile_releases_a_held_button_using_the_layer_it_was_pressed_under() {
+        let mut controller = MapController::new(shift_profile());
+        let mut kbm = MockKeyboardMouse::new();
+        kbm.expect_emit().returning(|outputs| outputs.len());
+
+        controller.apply(&update(CIRCLE | CROSS, 0), &mut kbm);
+
+        let held = PadState {
+            buttons: CIRCLE | CROSS,
+            ..PadState::default()
+        };
+
+        drop(kbm);
+        let mut kbm = MockKeyboardMouse::new();
+        kbm.expect_emit()
+            .withf(|outputs| {
+                outputs.contains(&Output::KeyUp(ESCAPE)) && !outputs.contains(&Output::KeyUp(SPACE))
+            })
+            .times(1)
+            .returning(|outputs| outputs.len());
+
+        controller.swap_profile(Profile::named("next"), &held, &mut kbm);
+    }
+
+    #[test]
+    fn swapping_profile_clears_shift_layer_so_the_new_profile_starts_clean() {
+        let mut controller = MapController::new(shift_profile());
+        let mut kbm = MockKeyboardMouse::new();
+        kbm.expect_emit().returning(|outputs| outputs.len());
+
+        controller.apply(&update(CIRCLE | CROSS, 0), &mut kbm);
+        controller.swap_profile(shift_profile(), &PadState::default(), &mut kbm);
+
+        drop(kbm);
+        let mut kbm = MockKeyboardMouse::new();
+        kbm.expect_emit()
+            .withf(|outputs| outputs == [Output::KeyDown(SPACE)])
+            .times(1)
+            .returning(|outputs| outputs.len());
+
+        controller.apply(&update(CROSS, 0), &mut kbm);
     }
 
     fn turbo_profile() -> Profile {
