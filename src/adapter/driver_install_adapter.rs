@@ -273,7 +273,12 @@ pub trait DriverInstaller {
 
     fn unregister_uninstall(&self) -> Result<(), InstallError>;
 
-    fn create_shortcut(&self, target: &Path, link: &Path) -> Result<(), InstallError>;
+    fn create_shortcut(
+        &self,
+        target: &Path,
+        link: &Path,
+        arguments: &str,
+    ) -> Result<(), InstallError>;
 
     fn remove_shortcuts(&self) -> usize;
 
@@ -325,6 +330,22 @@ pub fn install_selected(
     selection: &Selection,
     progress: &mut Progress,
 ) -> Result<(), InstallError> {
+    install_selected_with_self_exe(
+        installer,
+        package,
+        selection,
+        progress,
+        std::env::current_exe().ok().as_deref(),
+    )
+}
+
+fn install_selected_with_self_exe(
+    installer: &dyn DriverInstaller,
+    package: &Path,
+    selection: &Selection,
+    progress: &mut Progress,
+    self_exe: Option<&Path>,
+) -> Result<(), InstallError> {
     if !installer.is_elevated() {
         return Err(InstallError::NotElevated);
     }
@@ -374,7 +395,7 @@ pub fn install_selected(
         &format!("copying into {}", target.display()),
     );
 
-    copy_package(package, &target)?;
+    copy_package(package, &target, self_exe)?;
 
     progress.say(Step::Register, "writing the uninstall entry");
 
@@ -385,14 +406,24 @@ pub fn install_selected(
     if selection.desktop_shortcut && app.exists() {
         if let Some(desktop) = installer.desktop_dir() {
             progress.say(Step::Register, "adding the desktop shortcut");
-            installer.create_shortcut(&app, &desktop.join("OpenDS.lnk"))?;
+            installer.create_shortcut(&app, &desktop.join("OpenDS.lnk"), "")?;
         }
     }
 
     if selection.start_menu_shortcut && app.exists() {
         if let Some(menu) = installer.start_menu_dir() {
             progress.say(Step::Register, "adding the Start Menu shortcut");
-            installer.create_shortcut(&app, &menu.join("OpenDS.lnk"))?;
+            installer.create_shortcut(&app, &menu.join("OpenDS.lnk"), "")?;
+
+            let setup = target.join("OpenDS-Setup.exe");
+
+            if setup.exists() {
+                installer.create_shortcut(
+                    &setup,
+                    &menu.join("Uninstall OpenDS.lnk"),
+                    "/uninstall",
+                )?;
+            }
         }
     }
 
@@ -495,24 +526,17 @@ fn copy_with_retry(source: &Path, target: &Path) -> std::io::Result<u64> {
     })
 }
 
-fn copy_package(from: &Path, to: &Path) -> Result<(), InstallError> {
+fn copy_package(from: &Path, to: &Path, self_exe: Option<&Path>) -> Result<(), InstallError> {
     std::fs::create_dir_all(to).map_err(|error| InstallError::Copy {
         name: to.display().to_string(),
         reason: error.to_string(),
     })?;
 
-    let mut leaves: Vec<String> = PACKAGE_FILES
+    let leaves: Vec<String> = PACKAGE_FILES
         .iter()
         .chain(APP_FILES.iter())
         .map(|leaf| leaf.to_string())
         .collect();
-
-    if let Some(name) = std::env::current_exe().ok().and_then(|exe| {
-        exe.file_name()
-            .map(|name| name.to_string_lossy().to_string())
-    }) {
-        leaves.push(name);
-    }
 
     for leaf in leaves {
         let source = from.join(&leaf);
@@ -526,6 +550,17 @@ fn copy_package(from: &Path, to: &Path) -> Result<(), InstallError> {
             name: leaf.clone(),
             reason: error.to_string(),
         })?;
+    }
+
+    if let Some(exe) = self_exe {
+        let target = to.join("OpenDS-Setup.exe");
+
+        if exe.exists() && exe != target {
+            copy_with_retry(exe, &target).map_err(|error| InstallError::Copy {
+                name: "OpenDS-Setup.exe".to_string(),
+                reason: error.to_string(),
+            })?;
+        }
     }
 
     Ok(())
@@ -648,7 +683,8 @@ mod tests {
         let mut seen = |_: Step, _: &str| {};
         let mut progress = Progress { report: &mut seen };
 
-        let _ = install_selected(&installer, &package, &selection, &mut progress);
+        let _ =
+            install_selected_with_self_exe(&installer, &package, &selection, &mut progress, None);
     }
 
     #[test]
@@ -680,7 +716,8 @@ mod tests {
         let mut seen = |_: Step, _: &str| {};
         let mut progress = Progress { report: &mut seen };
 
-        install_selected(&installer, &package, &selection, &mut progress).unwrap();
+        install_selected_with_self_exe(&installer, &package, &selection, &mut progress, None)
+            .unwrap();
 
         assert!(
             custom_target.join(PACKAGE_FILES[0]).exists(),
@@ -689,6 +726,58 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&custom_target);
         let _ = std::fs::remove_dir_all(&package);
+    }
+
+    #[test]
+    fn the_running_setup_exe_is_copied_in_as_a_fixed_name_so_uninstall_can_find_it() {
+        let mut installer = MockDriverInstaller::new();
+
+        installer.expect_is_elevated().return_const(true);
+
+        let package = std::env::temp_dir().join("opends-self-copy-package");
+        std::fs::create_dir_all(&package).unwrap();
+
+        for leaf in PACKAGE_FILES {
+            std::fs::write(package.join(leaf), b"x").unwrap();
+        }
+
+        let self_exe = std::env::temp_dir().join("opends-self-copy-fake-setup-exe.exe");
+        std::fs::write(&self_exe, b"pretend setup exe").unwrap();
+
+        let target = std::env::temp_dir().join("opends-self-copy-target");
+        let _ = std::fs::remove_dir_all(&target);
+
+        let selection = Selection {
+            driver: false,
+            app: false,
+            desktop_shortcut: false,
+            start_menu_shortcut: false,
+            install_dir: target.clone(),
+        };
+
+        installer.expect_register_uninstall().returning(|_| Ok(()));
+
+        let mut seen = |_: Step, _: &str| {};
+        let mut progress = Progress { report: &mut seen };
+
+        install_selected_with_self_exe(
+            &installer,
+            &package,
+            &selection,
+            &mut progress,
+            Some(&self_exe),
+        )
+        .unwrap();
+
+        assert!(
+            target.join("OpenDS-Setup.exe").exists(),
+            "the running setup exe was not copied in under the fixed name \
+             register_uninstall expects to find"
+        );
+
+        let _ = std::fs::remove_dir_all(&target);
+        let _ = std::fs::remove_dir_all(&package);
+        let _ = std::fs::remove_file(&self_exe);
     }
 
     fn permission_denied() -> std::io::Error {

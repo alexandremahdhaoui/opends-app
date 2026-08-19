@@ -534,7 +534,11 @@ mod imp {
         }
     }
 
-    pub fn create_shortcut(target: &Path, link: &Path) -> Result<(), InstallError> {
+    pub fn create_shortcut(
+        target: &Path,
+        link: &Path,
+        arguments: &str,
+    ) -> Result<(), InstallError> {
         use windows::core::{Interface, GUID, PCWSTR};
         use windows::Win32::System::Com::{
             CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER,
@@ -567,6 +571,11 @@ mod imp {
 
             let description = wide("OpenDS gamepad driver");
             let _ = unsafe { shell.SetDescription(PCWSTR(description.as_ptr())) };
+
+            if !arguments.is_empty() {
+                let args_wide = wide(arguments);
+                let _ = unsafe { shell.SetArguments(PCWSTR(args_wide.as_ptr())) };
+            }
 
             let persist: IPersistFile = shell.cast().map_err(|_| fail())?;
 
@@ -650,7 +659,11 @@ mod imp {
         Err(InstallError::Registry)
     }
 
-    pub fn create_shortcut(_target: &Path, link: &Path) -> Result<(), InstallError> {
+    pub fn create_shortcut(
+        _target: &Path,
+        link: &Path,
+        _arguments: &str,
+    ) -> Result<(), InstallError> {
         Err(InstallError::Shortcut(link.display().to_string()))
     }
 }
@@ -704,15 +717,21 @@ impl DriverInstaller for WindowsDriverInstaller {
         imp::unregister_uninstall()
     }
 
-    fn create_shortcut(&self, target: &Path, link: &Path) -> Result<(), InstallError> {
-        imp::create_shortcut(target, link)
+    fn create_shortcut(
+        &self,
+        target: &Path,
+        link: &Path,
+        arguments: &str,
+    ) -> Result<(), InstallError> {
+        imp::create_shortcut(target, link, arguments)
     }
 
     fn remove_shortcuts(&self) -> usize {
-        [self.desktop_dir(), self.start_menu_dir()]
-            .into_iter()
+        let dirs = [self.desktop_dir(), self.start_menu_dir()];
+
+        dirs.into_iter()
             .flatten()
-            .map(|dir| dir.join("OpenDS.lnk"))
+            .flat_map(|dir| [dir.join("OpenDS.lnk"), dir.join("Uninstall OpenDS.lnk")])
             .filter(|link| link.exists() && std::fs::remove_file(link).is_ok())
             .count()
     }

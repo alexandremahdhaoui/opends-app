@@ -329,14 +329,20 @@ mod platform {
                 }
             }
 
-            for info in hid_adapter::sony_gamepads(&enumerator) {
+            let seen = hid_adapter::sony_gamepads(&enumerator);
+            let live_paths: Vec<String> = seen.iter().map(|info| info.path.clone()).collect();
+
+            attached_paths.retain(|path| live_paths.contains(path));
+            controller.prune_gone(&live_paths);
+
+            for info in &seen {
                 if attached_paths.contains(&info.path) {
                     continue;
                 }
 
                 let Some(kind) = info.kind() else { continue };
 
-                if let Ok(device) = hid_adapter::open(&info, false) {
+                if let Ok(device) = hid_adapter::open(info, false) {
                     attached_paths.push(info.path.clone());
                     controller.attach(Box::new(device) as Box<_>, kind);
                     output_dirty = true;
@@ -1452,11 +1458,21 @@ mod platform {
 
         let (tray_events, tray) = tray_adapter::spawn("OpenDS: starting");
 
+        let icon = eframe::icon_data::from_png_bytes(include_bytes!("../../assets/opends-64.png"))
+            .ok()
+            .map(std::sync::Arc::new);
+
+        let mut viewport = egui::ViewportBuilder::default()
+            .with_inner_size(WINDOW)
+            .with_min_inner_size(WINDOW)
+            .with_title("OpenDS");
+
+        if let Some(icon) = icon {
+            viewport = viewport.with_icon(icon);
+        }
+
         let options = eframe::NativeOptions {
-            viewport: egui::ViewportBuilder::default()
-                .with_inner_size(WINDOW)
-                .with_min_inner_size(WINDOW)
-                .with_title("OpenDS"),
+            viewport,
             ..Default::default()
         };
 

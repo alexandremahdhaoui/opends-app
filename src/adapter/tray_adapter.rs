@@ -153,9 +153,12 @@ mod platform {
 
                     let _ = DestroyMenu(menu);
 
+                    if chosen.0 as u32 == MENU_QUIT {
+                        std::process::exit(0);
+                    }
+
                     let event = match chosen.0 as u32 {
                         MENU_SHOW => Some(TrayEvent::Show),
-                        MENU_QUIT => Some(TrayEvent::Quit),
                         _ => None,
                     };
 
@@ -218,7 +221,13 @@ mod platform {
                 return;
             };
 
-            let icon = LoadIconW(None, IDI_APPLICATION).unwrap_or_default();
+            let app_icon = LoadIconW(
+                Some(instance.into()),
+                windows::core::PCWSTR(1 as *const u16),
+            );
+            let icon = app_icon
+                .or_else(|_| LoadIconW(None, IDI_APPLICATION))
+                .unwrap_or_default();
 
             let mut tip = [0u16; 128];
             let tip_wide = wide(&tooltip);

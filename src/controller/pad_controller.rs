@@ -203,6 +203,11 @@ impl PadController {
         self.sessions.len()
     }
 
+    pub fn prune_gone(&mut self, live_paths: &[String]) {
+        self.sessions
+            .retain(|session| live_paths.iter().any(|path| path == &session.info().path));
+    }
+
     pub fn sessions(&self) -> &[Session] {
         &self.sessions
     }
@@ -290,15 +295,61 @@ mod tests {
     }
 
     fn device_returning(reports: Vec<Option<Vec<u8>>>) -> Box<MockHidDevice> {
+        device_at_path("\\\\?\\hid#test", reports)
+    }
+
+    fn device_at_path(path: &str, reports: Vec<Option<Vec<u8>>>) -> Box<MockHidDevice> {
         let mut device = MockHidDevice::new();
         let mut queue = reports.into_iter();
+        let info = HidDeviceInfo {
+            path: path.to_string(),
+            ..test_info()
+        };
 
-        device.expect_info().return_const(test_info());
+        device.expect_info().return_const(info);
         device
             .expect_read_latest()
             .returning(move || queue.next().flatten());
 
         Box::new(device)
+    }
+
+    #[test]
+    fn pruning_with_the_same_path_still_live_keeps_the_session() {
+        let mut controller = PadController::new();
+        controller.attach(device_returning(vec![None]), DeviceKind::DualSense);
+
+        controller.prune_gone(&["\\\\?\\hid#test".to_string()]);
+
+        assert_eq!(controller.attached(), 1);
+    }
+
+    #[test]
+    fn pruning_a_path_that_vanished_removes_its_session() {
+        let mut controller = PadController::new();
+        controller.attach(device_returning(vec![None]), DeviceKind::DualSense);
+
+        controller.prune_gone(&[]);
+
+        assert_eq!(controller.attached(), 0);
+    }
+
+    #[test]
+    fn pruning_only_removes_the_session_whose_path_actually_vanished() {
+        let mut controller = PadController::new();
+        controller.attach(
+            device_at_path("\\\\?\\hid#gone", vec![None]),
+            DeviceKind::DualSense,
+        );
+        controller.attach(
+            device_at_path("\\\\?\\hid#stays", vec![None]),
+            DeviceKind::DualSense,
+        );
+
+        controller.prune_gone(&["\\\\?\\hid#stays".to_string()]);
+
+        assert_eq!(controller.attached(), 1);
+        assert_eq!(controller.sessions()[0].info().path, "\\\\?\\hid#stays");
     }
 
     #[test]

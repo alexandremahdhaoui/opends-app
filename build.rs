@@ -14,12 +14,15 @@ const PAYLOAD_FILES: &[&str] = &[
 fn main() {
     println!("cargo:rerun-if-changed=setup.rc");
     println!("cargo:rerun-if-changed=setup.manifest");
+    println!("cargo:rerun-if-changed=app.rc");
+    println!("cargo:rerun-if-changed=assets/opends.ico");
     println!("cargo:rerun-if-env-changed=OPENDS_PAYLOAD_DIR");
 
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());
 
     write_payload(&out);
     embed_manifest(&out);
+    embed_icon(&out);
 }
 
 fn write_payload(out: &Path) {
@@ -77,5 +80,34 @@ fn embed_manifest(out: &Path) {
             println!("cargo:rustc-link-arg-bin=OpenDS-Setup={}", object.display());
         }
         _ => println!("cargo:warning=windres missing, OpenDS-Setup will not self elevate"),
+    }
+}
+
+fn embed_icon(out: &Path) {
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+        return;
+    }
+
+    if env::var("CARGO_CFG_TARGET_ENV").as_deref() != Ok("gnu") {
+        return;
+    }
+
+    if !Path::new("assets/opends.ico").exists() {
+        println!("cargo:warning=assets/opends.ico is missing, exes will use the default icon");
+        return;
+    }
+
+    let object = out.join("app-icon.o");
+
+    let compiled = Command::new("x86_64-w64-mingw32-windres")
+        .args(["app.rc", "-O", "coff", "-o"])
+        .arg(&object)
+        .status();
+
+    match compiled {
+        Ok(status) if status.success() => {
+            println!("cargo:rustc-link-arg-bin=OpenDS={}", object.display());
+        }
+        _ => println!("cargo:warning=windres missing, OpenDS will use the default icon"),
     }
 }
