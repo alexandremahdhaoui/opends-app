@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::time::Instant;
 
 use opends_core::controller::mapping::{self, Binding, Output, Profile, TimedStep};
@@ -27,11 +28,17 @@ struct PendingMacro {
     fired_count: usize,
 }
 
+struct TurboTrack {
+    started_at: Instant,
+    pressed: bool,
+}
+
 pub struct MapController {
     profile: Profile,
     emitted: u64,
     touch_baseline: Option<(u16, u16)>,
     pending_macro: Option<PendingMacro>,
+    turbo_state: HashMap<ButtonMask, TurboTrack>,
 }
 
 impl MapController {
@@ -41,6 +48,7 @@ impl MapController {
             emitted: 0,
             touch_baseline: None,
             pending_macro: None,
+            turbo_state: HashMap::new(),
         }
     }
 
@@ -76,6 +84,7 @@ impl MapController {
         }
 
         outputs.extend(self.timed_macro_outputs(update, now));
+        outputs.extend(self.turbo_outputs(update, now));
 
         if outputs.is_empty() {
             return 0;
@@ -136,6 +145,58 @@ impl MapController {
         outputs
     }
 
+    fn turbo_outputs(&mut self, update: &Update, now: Instant) -> Vec<Output> {
+        let mut outputs = Vec::new();
+
+        for (mask, _) in ALL_BUTTONS {
+            if update.released & mask != 0 {
+                self.turbo_state.remove(mask);
+            }
+        }
+
+        for (mask, name) in ALL_BUTTONS {
+            if update.pressed & mask != 0 && self.profile.turbo_buttons.contains(*name) {
+                self.turbo_state.insert(
+                    *mask,
+                    TurboTrack {
+                        started_at: now,
+                        pressed: true,
+                    },
+                );
+            }
+        }
+
+        for (mask, name) in ALL_BUTTONS {
+            if update.state.buttons & mask == 0 || !self.profile.turbo_buttons.contains(*name) {
+                continue;
+            }
+
+            let Some(track) = self.turbo_state.get_mut(mask) else {
+                continue;
+            };
+
+            let elapsed_ms = now.saturating_duration_since(track.started_at).as_millis() as u64;
+            let phase_pressed =
+                mapping::turbo_pressed_phase(elapsed_ms, self.profile.turbo_interval_ms);
+
+            if phase_pressed == track.pressed {
+                continue;
+            }
+
+            track.pressed = phase_pressed;
+
+            if let Some(binding) = self.profile.binding_for(*mask) {
+                if phase_pressed {
+                    push_press_step(binding, &mut outputs);
+                } else {
+                    push_release_step(binding, &mut outputs);
+                }
+            }
+        }
+
+        outputs
+    }
+
     pub fn swap_profile(
         &mut self,
         next: Profile,
@@ -150,6 +211,7 @@ impl MapController {
             }
         }
 
+        self.turbo_state.clear();
         self.profile = next;
 
         if releases.is_empty() {
@@ -533,6 +595,154 @@ mod tests {
                 start + Duration::from_millis(60)
             ),
             2
+        );
+    }
+
+    fn turbo_profile() -> Profile {
+        Profile::named("turbo")
+            .bind("Cross", Binding::Key { code: SPACE })
+            .with_turbo("Cross")
+            .with_turbo_interval_ms(100)
+    }
+
+    #[test]
+    fn pressing_a_turbo_button_fires_the_ordinary_press_and_nothing_else_immediately() {
+        let mut controller = MapController::new(turbo_profile());
+        let mut kbm = MockKeyboardMouse::new();
+
+        kbm.expect_emit()
+            .withf(|outputs| outputs == [Output::KeyDown(SPACE)])
+            .times(1)
+            .returning(|outputs| outputs.len());
+
+        let now = Instant::now();
+        assert_eq!(controller.apply_at(&update(CROSS, 0), &mut kbm, now), 1);
+    }
+
+    #[test]
+    fn a_turbo_button_still_held_releases_at_half_the_interval() {
+        let mut controller = MapController::new(turbo_profile());
+        let mut kbm = MockKeyboardMouse::new();
+        kbm.expect_emit().returning(|outputs| outputs.len());
+
+        let start = Instant::now();
+        controller.apply_at(&update(CROSS, 0), &mut kbm, start);
+
+        let mut held = update(0, 0);
+        held.state.buttons = CROSS;
+
+        drop(kbm);
+        let mut kbm = MockKeyboardMouse::new();
+        kbm.expect_emit()
+            .withf(|outputs| outputs == [Output::KeyUp(SPACE)])
+            .times(1)
+            .returning(|outputs| outputs.len());
+
+        assert_eq!(
+            controller.apply_at(&held, &mut kbm, start + Duration::from_millis(50)),
+            1
+        );
+    }
+
+    #[test]
+    fn a_turbo_button_still_held_re_presses_a_full_interval_in() {
+        let mut controller = MapController::new(turbo_profile());
+        let mut kbm = MockKeyboardMouse::new();
+        kbm.expect_emit().returning(|outputs| outputs.len());
+
+        let start = Instant::now();
+        controller.apply_at(&update(CROSS, 0), &mut kbm, start);
+
+        let mut held = update(0, 0);
+        held.state.buttons = CROSS;
+        controller.apply_at(&held, &mut kbm, start + Duration::from_millis(50));
+
+        drop(kbm);
+        let mut kbm = MockKeyboardMouse::new();
+        kbm.expect_emit()
+            .withf(|outputs| outputs == [Output::KeyDown(SPACE)])
+            .times(1)
+            .returning(|outputs| outputs.len());
+
+        assert_eq!(
+            controller.apply_at(&held, &mut kbm, start + Duration::from_millis(100)),
+            1
+        );
+    }
+
+    #[test]
+    fn releasing_a_turbo_button_stops_the_repeat_and_clears_its_state() {
+        let mut controller = MapController::new(turbo_profile());
+        let mut kbm = MockKeyboardMouse::new();
+        kbm.expect_emit().returning(|outputs| outputs.len());
+
+        let start = Instant::now();
+        controller.apply_at(&update(CROSS, 0), &mut kbm, start);
+        controller.apply_at(
+            &update(0, CROSS),
+            &mut kbm,
+            start + Duration::from_millis(10),
+        );
+
+        drop(kbm);
+        let mut kbm = MockKeyboardMouse::new();
+        kbm.expect_emit().never();
+
+        let mut held = update(0, 0);
+        held.state.buttons = 0;
+        assert_eq!(
+            controller.apply_at(&held, &mut kbm, start + Duration::from_millis(200)),
+            0
+        );
+    }
+
+    #[test]
+    fn an_ordinary_binding_never_repeats_no_matter_how_long_it_is_held() {
+        let mut controller = MapController::new(profile());
+        let mut kbm = MockKeyboardMouse::new();
+        kbm.expect_emit().returning(|outputs| outputs.len());
+
+        let start = Instant::now();
+        controller.apply_at(&update(CIRCLE, 0), &mut kbm, start);
+
+        let mut held = update(0, 0);
+        held.state.buttons = CIRCLE;
+
+        drop(kbm);
+        let mut kbm = MockKeyboardMouse::new();
+        kbm.expect_emit().never();
+
+        assert_eq!(
+            controller.apply_at(&held, &mut kbm, start + Duration::from_millis(500)),
+            0
+        );
+    }
+
+    #[test]
+    fn swapping_profile_clears_turbo_state_so_the_new_profile_starts_clean() {
+        let mut controller = MapController::new(turbo_profile());
+        let mut kbm = MockKeyboardMouse::new();
+        kbm.expect_emit().returning(|outputs| outputs.len());
+
+        let start = Instant::now();
+        controller.apply_at(&update(CROSS, 0), &mut kbm, start);
+
+        controller.swap_profile(turbo_profile(), &PadState::default(), &mut kbm);
+
+        drop(kbm);
+        let mut kbm = MockKeyboardMouse::new();
+        kbm.expect_emit()
+            .withf(|outputs| outputs == [Output::KeyDown(SPACE)])
+            .times(1)
+            .returning(|outputs| outputs.len());
+
+        assert_eq!(
+            controller.apply_at(
+                &update(CROSS, 0),
+                &mut kbm,
+                start + Duration::from_millis(500)
+            ),
+            1
         );
     }
 

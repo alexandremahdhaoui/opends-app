@@ -476,6 +476,7 @@ mod platform {
         combo_key_code_input: String,
         combo_mouse_button: MouseButton,
         combo_delay_ms_input: String,
+        turbo: bool,
     }
 
     impl BindingRow {
@@ -491,6 +492,7 @@ mod platform {
                 combo_key_code_input: String::new(),
                 combo_mouse_button: MouseButton::Left,
                 combo_delay_ms_input: "0".to_string(),
+                turbo: false,
             }
         }
 
@@ -605,6 +607,7 @@ mod platform {
         current_profile: Option<Profile>,
         profile_path_input: String,
         binding_rows: Vec<BindingRow>,
+        turbo_interval_ms_input: String,
         tab: Tab,
         auto_profile: Arc<Mutex<AutoProfileConfig>>,
         auto_profile_rows: Vec<(String, String)>,
@@ -626,11 +629,17 @@ mod platform {
 
                     self.binding_rows = opends_core::types::pad::ALL_BUTTONS
                         .iter()
-                        .map(|(mask, name)| match profile.bindings.get(*name) {
-                            Some(binding) => BindingRow::from_binding(*mask, name, binding),
-                            None => BindingRow::new(*mask, name),
+                        .map(|(mask, name)| {
+                            let mut row = match profile.bindings.get(*name) {
+                                Some(binding) => BindingRow::from_binding(*mask, name, binding),
+                                None => BindingRow::new(*mask, name),
+                            };
+                            row.turbo = profile.turbo_buttons.contains(*name);
+                            row
                         })
                         .collect();
+
+                    self.turbo_interval_ms_input = profile.turbo_interval_ms.to_string();
 
                     self.current_profile = Some(profile);
                     self.push_profile_update();
@@ -644,6 +653,7 @@ mod platform {
         fn sync_bindings_into_profile(&mut self) {
             if let Some(profile) = self.current_profile.as_mut() {
                 profile.bindings.clear();
+                profile.turbo_buttons.clear();
 
                 for row in &self.binding_rows {
                     let binding = row.to_binding();
@@ -653,9 +663,21 @@ mod platform {
                             .bindings
                             .insert(row.button_name.to_string(), binding);
                     }
+
+                    if row.turbo && row.kind != BindingKind::Unbound {
+                        profile.turbo_buttons.insert(row.button_name.to_string());
+                    }
                 }
 
                 self.mapping_status.binding_count = profile.bindings.len();
+            }
+
+            self.push_profile_update();
+        }
+
+        fn set_turbo_interval_ms(&mut self, interval_ms: u32) {
+            if let Some(profile) = self.current_profile.as_mut() {
+                profile.turbo_interval_ms = interval_ms.max(2);
             }
 
             self.push_profile_update();
@@ -998,8 +1020,28 @@ mod platform {
             ui.label(theme::muted(
                 "What each button does. Check \"Also\" to fire a second action on the same \
                  press, a simple two-step macro. Leave the delay at 0 to fire both at once, \
-                 or set it to fire the second action a moment after the first.",
+                 or set it to fire the second action a moment after the first. Check \"Turbo\" \
+                 to make a button auto-repeat while held, at the rate below.",
             ));
+
+            ui.horizontal(|ui| {
+                ui.label("Turbo rate:");
+
+                if ui
+                    .add(
+                        egui::TextEdit::singleline(&mut self.turbo_interval_ms_input)
+                            .desired_width(50.0),
+                    )
+                    .changed()
+                {
+                    if let Ok(interval_ms) = self.turbo_interval_ms_input.parse::<u32>() {
+                        self.set_turbo_interval_ms(interval_ms);
+                    }
+                }
+
+                ui.label("ms per repeat");
+            });
+
             ui.add_space(10.0);
 
             let mut changed = false;
@@ -1062,6 +1104,16 @@ mod platform {
                         changed = true;
                     }
                 });
+
+                if row.kind != BindingKind::Unbound {
+                    ui.horizontal(|ui| {
+                        ui.add_space(24.0);
+
+                        if ui.checkbox(&mut row.turbo, "Turbo").changed() {
+                            changed = true;
+                        }
+                    });
+                }
 
                 if row.kind != BindingKind::Unbound && row.combo_enabled {
                     ui.horizontal(|ui| {
@@ -1371,6 +1423,7 @@ mod platform {
                     current_profile: None,
                     profile_path_input: String::new(),
                     binding_rows: Vec::new(),
+                    turbo_interval_ms_input: "100".to_string(),
                     tab: Tab::default(),
                     auto_profile,
                     auto_profile_rows: persisted.rules,
