@@ -14,9 +14,11 @@
 
 pub mod auto_profile_adapter;
 pub mod console_adapter;
+pub mod device_enumeration_adapter;
 pub mod driver_install_adapter;
 pub mod driver_install_win;
 pub mod elevation_adapter;
+pub mod feature_flags_adapter;
 pub mod foreground_process_adapter;
 pub mod hid_adapter;
 pub mod kbm_adapter;
