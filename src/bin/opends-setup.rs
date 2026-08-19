@@ -432,15 +432,25 @@ mod app {
     }
 
     pub fn run(mode: Mode, self_test: bool) {
+        let icon = eframe::icon_data::from_png_bytes(include_bytes!("../../assets/opends-64.png"))
+            .ok()
+            .map(std::sync::Arc::new);
+
+        let mut viewport = egui::ViewportBuilder::default()
+            .with_inner_size(WINDOW)
+            .with_min_inner_size(WINDOW)
+            .with_resizable(false)
+            .with_title(match mode {
+                Mode::Install => "OpenDS Setup",
+                Mode::Uninstall => "OpenDS Uninstall",
+            });
+
+        if let Some(icon) = icon {
+            viewport = viewport.with_icon(icon);
+        }
+
         let options = eframe::NativeOptions {
-            viewport: egui::ViewportBuilder::default()
-                .with_inner_size(WINDOW)
-                .with_min_inner_size(WINDOW)
-                .with_resizable(false)
-                .with_title(match mode {
-                    Mode::Install => "OpenDS Setup",
-                    Mode::Uninstall => "OpenDS Uninstall",
-                }),
+            viewport,
             ..Default::default()
         };
 
