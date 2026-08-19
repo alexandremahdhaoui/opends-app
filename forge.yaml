@@ -1,0 +1,91 @@
+name: opends-app
+
+artifactStorePath: .forge/artifact-store.yaml
+
+build:
+  - name: license-headers
+    src: ./src
+    engine: go://rust-license-header
+    spec:
+      holder: "Alexandre Mahdhaoui"
+
+  - name: resolve-spec
+    src: .
+    engine: go://generic-builder
+    spec:
+      command: sh
+      args:
+        - -c
+        - >-
+          sh ../opends-spec/hack/resolve-spec.sh
+          github.com/alexandremahdhaoui/opends-spec
+          spec/opends.v1.yaml .forge/spec-cache
+
+  - name: format-code
+    src: .
+    engine: go://generic-builder
+    spec:
+      command: cargo
+      args: ["fmt", "-p", "opends-app"]
+
+  - name: opends-app
+    src: ./src
+    engine: go://generic-builder
+    spec:
+      command: cargo
+      args: ["build", "-p", "opends-app", "--release"]
+
+  - name: opends-windows
+    src: ./src
+    engine: go://generic-builder
+    spec:
+      command: sh
+      args:
+        - -c
+        - >-
+          cargo build --release --target x86_64-pc-windows-gnu
+          -p opends-app --bin OpenDS --bin OpenDS-Setup &&
+          sh hack/deploy.sh
+
+test:
+  - name: lint
+    runner: go://generic-test-runner
+    spec:
+      command: cargo
+      args: ["clippy", "-p", "opends-app", "--all-targets", "--", "-D", "warnings"]
+
+  - name: format-check
+    runner: go://generic-test-runner
+    spec:
+      command: cargo
+      args: ["fmt", "-p", "opends-app", "--", "--check"]
+
+  - name: unit
+    runner: go://generic-test-runner
+    spec:
+      command: cargo
+      args: ["test", "-p", "opends-app"]
+
+  - name: unit-windows
+    runner: go://generic-test-runner
+    spec:
+      command: sh
+      args: ["hack/unit-windows.sh"]
+
+  - name: netcheck
+    runner: go://generic-test-runner
+    spec:
+      command: sh
+      args: ["hack/netcheck.sh"]
+
+  - name: architecture
+    runner: go://generic-test-runner
+    spec:
+      command: sh
+      args: ["hack/architecture.sh", "0"]
+
+  - name: coverage
+    runner: go://generic-test-runner
+    spec:
+      command: sh
+      args: ["hack/coverage.sh", "95"]
