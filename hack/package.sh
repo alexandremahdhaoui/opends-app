@@ -9,14 +9,28 @@ DRIVER="../opends-uhid/build"
 
 die() { echo "package: $*" >&2; exit 1; }
 
-echo "package: 1 of 4, building OpenDS.exe"
-
-cargo build --release --target "$TARGET" -p opends-app --bin OpenDS
-
-echo "package: 2 of 4, staging the payload"
+echo "package: 1 of 4, staging OpenDS.exe"
 
 mkdir -p "$STAGE"
-cp "$RELEASE/OpenDS.exe" "$STAGE/"
+
+if [ -f /tmp/opends-allowed-app.txt ]; then
+    ALLOWED_APP=$(cat /tmp/opends-allowed-app.txt)
+    ALLOWED_PATH="$DEST/$ALLOWED_APP"
+
+    if [ -f "$ALLOWED_PATH" ]; then
+        echo "package: reusing the exact Smart App Control cleared build ($ALLOWED_APP)"
+        echo "package: rebuilding it here would relink and produce different, unproven bytes"
+        cp "$ALLOWED_PATH" "$STAGE/OpenDS.exe"
+    else
+        die "recorded cleared app $ALLOWED_PATH no longer exists, run sac-retry.sh app again"
+    fi
+else
+    echo "package: no cleared build on record, building OpenDS.exe fresh"
+    cargo build --release --target "$TARGET" -p opends-app --bin OpenDS
+    cp "$RELEASE/OpenDS.exe" "$STAGE/"
+fi
+
+echo "package: 2 of 4, staging the rest of the payload"
 
 for leaf in opends-uhid.dll opends-uhid.inf opends-uhid.cat opends.cer; do
     if [ -f "$DRIVER/$leaf" ]; then
