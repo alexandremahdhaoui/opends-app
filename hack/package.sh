@@ -44,8 +44,18 @@ done
 
 echo "package: 3 of 4, building the installer with the payload inside"
 
+touch build.rs
+
 OPENDS_PAYLOAD_DIR="$STAGE" cargo build --release --target "$TARGET" \
     -p opends-app --bin OpenDS-Setup
+
+if [ -f "$STAGE/opends-uhid.inf" ]; then
+    STAGED_DRIVER_VER=$(grep "^DriverVer" "$STAGE/opends-uhid.inf")
+    EMBEDDED_DRIVER_VER=$(strings "$RELEASE/OpenDS-Setup.exe" | grep "^DriverVer" | head -1)
+
+    [ "$STAGED_DRIVER_VER" = "$EMBEDDED_DRIVER_VER" ] || die \
+        "embedded driver ($EMBEDDED_DRIVER_VER) does not match the staged one ($STAGED_DRIVER_VER), touch build.rs was not enough, investigate before installing"
+fi
 
 echo "package: 4 of 4, deploying"
 
