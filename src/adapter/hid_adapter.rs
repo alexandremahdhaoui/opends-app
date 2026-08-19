@@ -434,7 +434,7 @@ pub mod platform {
                 WriteFile(
                     self.handle,
                     Some(report),
-                    Some(&mut written),
+                    None,
                     Some(self.write_overlapped.as_mut()),
                 )
             };
