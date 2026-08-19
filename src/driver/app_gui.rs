@@ -234,7 +234,9 @@ mod platform {
     use egui::Color32;
 
     use opends_core::controller::mapping;
-    use opends_core::controller::mapping::{Binding, MouseButton, Profile, TimedStep};
+    use opends_core::controller::mapping::{
+        Binding, FeatureFlags, MouseButton, Profile, TimedStep,
+    };
     use opends_core::controller::output::{Colour, PadOutput, Rumble};
 
     use crate::adapter::driver_install_adapter::DriverInstaller;
@@ -256,7 +258,7 @@ mod platform {
         TriggerPreset,
     };
 
-    const WINDOW: [f32; 2] = [440.0, 680.0];
+    const WINDOW: [f32; 2] = [760.0, 740.0];
 
     #[derive(Default)]
     struct MappingSlot {
@@ -272,6 +274,128 @@ mod platform {
         version: u64,
     }
 
+    #[derive(Default)]
+    struct FeatureFlagsSlot {
+        flags: FeatureFlags,
+        version: u64,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum FeatureKind {
+        GyroToMouse,
+        TouchpadToMouse,
+        AdaptiveTriggers,
+        Turbo,
+        ShiftLayer,
+        AutoProfileSwitching,
+    }
+
+    impl FeatureKind {
+        const ALL: &'static [FeatureKind] = &[
+            FeatureKind::GyroToMouse,
+            FeatureKind::TouchpadToMouse,
+            FeatureKind::AdaptiveTriggers,
+            FeatureKind::Turbo,
+            FeatureKind::ShiftLayer,
+            FeatureKind::AutoProfileSwitching,
+        ];
+
+        fn name(self) -> &'static str {
+            match self {
+                FeatureKind::GyroToMouse => "Gyro to mouse",
+                FeatureKind::TouchpadToMouse => "Touchpad to mouse",
+                FeatureKind::AdaptiveTriggers => "Adaptive triggers",
+                FeatureKind::Turbo => "Turbo",
+                FeatureKind::ShiftLayer => "Shift layer",
+                FeatureKind::AutoProfileSwitching => "Auto profile switching",
+            }
+        }
+
+        fn summary(self) -> &'static str {
+            match self {
+                FeatureKind::GyroToMouse => "Tilt the pad to move the mouse cursor.",
+                FeatureKind::TouchpadToMouse => "Drag a finger on the touchpad to move the mouse.",
+                FeatureKind::AdaptiveTriggers => {
+                    "The triggers push back or pulse under your finger."
+                }
+                FeatureKind::Turbo => "A button fires over and over while held.",
+                FeatureKind::ShiftLayer => {
+                    "Hold one button to give every other button a second action."
+                }
+                FeatureKind::AutoProfileSwitching => {
+                    "Load a different profile automatically per game."
+                }
+            }
+        }
+
+        fn what_it_does(self) -> &'static str {
+            match self {
+                FeatureKind::GyroToMouse => {
+                    "Reads the pad's gyroscope every tick and turns tilt into a relative mouse move, scaled by the sensitivity on the Status tab."
+                }
+                FeatureKind::TouchpadToMouse => {
+                    "Tracks the first finger on the touchpad frame to frame and turns the drag into a relative mouse move."
+                }
+                FeatureKind::AdaptiveTriggers => {
+                    "Sends the DualSense's adaptive trigger motors a resistance or pulse effect, chosen on the Bindings tab."
+                }
+                FeatureKind::Turbo => {
+                    "Any button marked Turbo on the Bindings tab alternates pressed and released automatically while held, at the configured rate."
+                }
+                FeatureKind::ShiftLayer => {
+                    "While the chosen shift button is held, other buttons can fire a different binding, set as shift_bindings in the profile."
+                }
+                FeatureKind::AutoProfileSwitching => {
+                    "Checks the foreground window's process name every tick against the rules on the Auto profile tab and swaps the loaded profile when it matches."
+                }
+            }
+        }
+
+        fn when_to_enable(self) -> &'static str {
+            match self {
+                FeatureKind::GyroToMouse => "You want to aim or look around with the pad tilted in your hands, like a lightgun.",
+                FeatureKind::TouchpadToMouse => "You want a trackpad-style pointer without reaching for a mouse.",
+                FeatureKind::AdaptiveTriggers => "The game has a matching effect and you want to feel it, or you set a preset you like.",
+                FeatureKind::Turbo => "You want a rapid-fire button for a game that rewards mashing.",
+                FeatureKind::ShiftLayer => "You are out of buttons and want one held button to unlock a second set of actions.",
+                FeatureKind::AutoProfileSwitching => "You keep multiple profiles and want the right one to load without picking it by hand.",
+            }
+        }
+
+        fn when_to_disable(self) -> &'static str {
+            match self {
+                FeatureKind::GyroToMouse => "The pad picks up unwanted mouse drift from normal handling, or you never use it.",
+                FeatureKind::TouchpadToMouse => "You rest a thumb on the touchpad and the cursor moves by accident.",
+                FeatureKind::AdaptiveTriggers => "The resistance feels unpleasant, or the game does not use it.",
+                FeatureKind::Turbo => "You need a normal single press and turbo is firing when you do not want it to.",
+                FeatureKind::ShiftLayer => "You are not using the second layer and want to simplify what each button does.",
+                FeatureKind::AutoProfileSwitching => "You always want your one profile loaded regardless of what is in focus.",
+            }
+        }
+
+        fn get(self, flags: &FeatureFlags) -> bool {
+            match self {
+                FeatureKind::GyroToMouse => flags.gyro_to_mouse,
+                FeatureKind::TouchpadToMouse => flags.touchpad_to_mouse,
+                FeatureKind::AdaptiveTriggers => flags.adaptive_triggers,
+                FeatureKind::Turbo => flags.turbo,
+                FeatureKind::ShiftLayer => flags.shift_layer,
+                FeatureKind::AutoProfileSwitching => flags.auto_profile_switching,
+            }
+        }
+
+        fn set(self, flags: &mut FeatureFlags, value: bool) {
+            match self {
+                FeatureKind::GyroToMouse => flags.gyro_to_mouse = value,
+                FeatureKind::TouchpadToMouse => flags.touchpad_to_mouse = value,
+                FeatureKind::AdaptiveTriggers => flags.adaptive_triggers = value,
+                FeatureKind::Turbo => flags.turbo = value,
+                FeatureKind::ShiftLayer => flags.shift_layer = value,
+                FeatureKind::AutoProfileSwitching => flags.auto_profile_switching = value,
+            }
+        }
+    }
+
     fn open_virtual_pad() -> Option<UhidPad> {
         let installer = WindowsDriverInstaller::new();
 
@@ -284,6 +408,7 @@ mod platform {
         shared: Arc<Mutex<GuiStatus>>,
         mapping: Arc<Mutex<MappingSlot>>,
         auto_profile: Arc<Mutex<AutoProfileConfig>>,
+        feature_flags: Arc<Mutex<FeatureFlagsSlot>>,
     ) {
         let enumerator = SetupApiEnumerator::new();
         let mut controller = PadController::new();
@@ -292,6 +417,7 @@ mod platform {
         let mut kbm = SendInputKbm::new();
         let mut mapper: Option<MapController> = None;
         let mut mapper_version = 0u64;
+        let mut mapper_flags_version = 0u64;
         let mut wanted = PadOutput {
             lightbar: Colour::new(0, 40, 120),
             ..PadOutput::default()
@@ -302,6 +428,11 @@ mod platform {
         let mut auto_profile_version = 0u64;
 
         loop {
+            let (flags, flags_version) = feature_flags
+                .lock()
+                .map(|slot| (slot.flags, slot.version))
+                .unwrap_or_default();
+
             let (auto_rules, auto_default, auto_version) = auto_profile
                 .lock()
                 .map(|config| {
@@ -318,13 +449,15 @@ mod platform {
                 auto_switcher = AutoProfileSwitcher::new(auto_rules, auto_default);
             }
 
-            if let Some(path) =
-                auto_switcher.profile_to_load(foreground_process.current_process_name().as_deref())
-            {
-                if let Ok(profile) = FileProfiles::new().load(&path) {
-                    if let Ok(mut guard) = mapping.lock() {
-                        guard.profile = Some(profile);
-                        guard.version += 1;
+            if flags.auto_profile_switching {
+                if let Some(path) = auto_switcher
+                    .profile_to_load(foreground_process.current_process_name().as_deref())
+                {
+                    if let Ok(profile) = FileProfiles::new().load(&path) {
+                        if let Ok(mut guard) = mapping.lock() {
+                            guard.profile = Some(profile);
+                            guard.version += 1;
+                        }
                     }
                 }
             }
@@ -354,9 +487,12 @@ mod platform {
                 .map(|guard| (guard.enabled, guard.version, guard.profile.clone()))
                 .unwrap_or((false, 0, None));
 
-            if mapping_version != mapper_version {
+            if mapping_version != mapper_version || flags_version != mapper_flags_version {
                 mapper_version = mapping_version;
-                mapper = mapping_profile.map(MapController::new);
+                mapper_flags_version = flags_version;
+                mapper = mapping_profile
+                    .map(|profile| mapping::strip_disabled_features(&profile, &flags))
+                    .map(MapController::new);
                 wanted.left_trigger = mapper
                     .as_ref()
                     .map(|mapper| mapper.profile().left_trigger)
@@ -434,6 +570,8 @@ mod platform {
         Test,
         Bindings,
         AutoProfile,
+        Features,
+        Introspection,
     }
 
     #[derive(Clone, Copy, PartialEq, Eq)]
@@ -620,6 +758,11 @@ mod platform {
         auto_profile_default_input: String,
         tray: tray_adapter::TrayHandle,
         tray_events: std::sync::mpsc::Receiver<TrayEvent>,
+        feature_flags: Arc<Mutex<FeatureFlagsSlot>>,
+        feature_flags_local: FeatureFlags,
+        feature_modal: Option<FeatureKind>,
+        registered_pads: Vec<crate::adapter::device_enumeration_adapter::RegisteredPad>,
+        pads_scanned: bool,
     }
 
     impl App {
@@ -1334,6 +1477,155 @@ mod platform {
                  no restart needed."
             )));
         }
+        fn push_feature_flags_update(&mut self) {
+            if let Ok(mut guard) = self.feature_flags.lock() {
+                guard.flags = self.feature_flags_local;
+                guard.version += 1;
+            }
+
+            let _ = crate::adapter::feature_flags_adapter::save(
+                &crate::adapter::feature_flags_adapter::config_path(),
+                &self.feature_flags_local,
+            );
+        }
+
+        fn features_tab(&mut self, ui: &mut egui::Ui) {
+            ui.label(theme::muted(
+                "Turn a whole capability on or off for every profile. This is a coarser \
+                 switch than a profile's own settings: off means the code for it never \
+                 runs, not just that the value is ignored. Changes persist across restarts.",
+            ));
+            ui.add_space(10.0);
+
+            let columns = 2;
+            let spacing = ui.spacing().item_spacing.x;
+            let card_width = ((ui.available_width() - spacing * (columns as f32 + 1.0))
+                / columns as f32)
+                .max(180.0);
+            let mut changed = false;
+
+            egui::Grid::new("features_grid")
+                .num_columns(columns)
+                .spacing(egui::vec2(spacing, 8.0))
+                .show(ui, |ui| {
+                    for (index, kind) in FeatureKind::ALL.iter().enumerate() {
+                        ui.group(|ui| {
+                            ui.set_width(card_width);
+
+                            ui.vertical(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(egui::RichText::new(kind.name()).strong());
+
+                                    let mut enabled = kind.get(&self.feature_flags_local);
+
+                                    if ui.checkbox(&mut enabled, "").changed() {
+                                        kind.set(&mut self.feature_flags_local, enabled);
+                                        changed = true;
+                                    }
+                                });
+
+                                ui.label(theme::muted(kind.summary()));
+                                ui.add_space(4.0);
+
+                                if ui.small_button("Learn more").clicked() {
+                                    self.feature_modal = Some(*kind);
+                                }
+                            });
+                        });
+
+                        if (index + 1) % columns == 0 {
+                            ui.end_row();
+                        }
+                    }
+                });
+
+            if changed {
+                self.push_feature_flags_update();
+            }
+
+            if let Some(kind) = self.feature_modal {
+                let mut open = true;
+
+                egui::Window::new(kind.name())
+                    .collapsible(false)
+                    .resizable(false)
+                    .open(&mut open)
+                    .show(ui.ctx(), |ui| {
+                        ui.set_max_width(360.0);
+
+                        ui.label(egui::RichText::new("What it does").strong());
+                        ui.label(kind.what_it_does());
+                        ui.add_space(8.0);
+
+                        ui.label(egui::RichText::new("Turn it on when").strong());
+                        ui.label(kind.when_to_enable());
+                        ui.add_space(8.0);
+
+                        ui.label(egui::RichText::new("Turn it off when").strong());
+                        ui.label(kind.when_to_disable());
+                    });
+
+                if !open {
+                    self.feature_modal = None;
+                }
+            }
+        }
+
+        fn introspection_tab(&mut self, ui: &mut egui::Ui) {
+            ui.label(theme::muted(
+                "Every Xbox-shaped virtual pad registered on this machine, ours and \
+                 anyone else's. A stray entry is one this app created in an earlier \
+                 run and never cleaned up.",
+            ));
+            ui.add_space(10.0);
+
+            if ui.button("Scan").clicked() || !self.pads_scanned {
+                self.registered_pads =
+                    crate::adapter::device_enumeration_adapter::list_registered_pads();
+                self.pads_scanned = true;
+            }
+
+            ui.add_space(10.0);
+
+            if self.registered_pads.is_empty() {
+                ui.label(theme::muted("Nothing registered right now."));
+            }
+
+            let mut remove_id: Option<String> = None;
+
+            for pad in &self.registered_pads {
+                ui.horizontal(|ui| {
+                    ui.label(if pad.is_ours { "Ours" } else { "Not ours" });
+                    ui.label(&pad.friendly_name);
+                    ui.label(theme::muted(&pad.instance_id));
+
+                    if pad.is_ours && ui.small_button("Remove").clicked() {
+                        remove_id = Some(pad.instance_id.clone());
+                    }
+                });
+            }
+
+            if let Some(instance_id) = remove_id {
+                crate::adapter::device_enumeration_adapter::remove_pad(&instance_id);
+                self.registered_pads =
+                    crate::adapter::device_enumeration_adapter::list_registered_pads();
+            }
+
+            ui.add_space(16.0);
+            ui.separator();
+            ui.add_space(10.0);
+
+            ui.label(egui::RichText::new("Driver log").strong());
+
+            let log = crate::adapter::device_enumeration_adapter::tail_driver_log();
+
+            egui::ScrollArea::vertical()
+                .id_salt("introspection_log")
+                .max_height(180.0)
+                .show(ui, |ui| {
+                    ui.label(theme::muted(if log.is_empty() { "(empty)" } else { &log }));
+                });
+        }
     }
 
     fn test_tab(ui: &mut egui::Ui, status: &GuiStatus) {
@@ -1423,6 +1715,20 @@ mod platform {
                         {
                             self.tab = Tab::AutoProfile;
                         }
+
+                        if ui
+                            .selectable_label(self.tab == Tab::Features, "Features")
+                            .clicked()
+                        {
+                            self.tab = Tab::Features;
+                        }
+
+                        if ui
+                            .selectable_label(self.tab == Tab::Introspection, "Introspection")
+                            .clicked()
+                        {
+                            self.tab = Tab::Introspection;
+                        }
                     });
 
                     ui.add_space(10.0);
@@ -1436,6 +1742,8 @@ mod platform {
                             Tab::Test => test_tab(ui, &status),
                             Tab::Bindings => self.bindings_tab(ui),
                             Tab::AutoProfile => self.auto_profile_tab(ui),
+                            Tab::Features => self.features_tab(ui),
+                            Tab::Introspection => self.introspection_tab(ui),
                         });
                 });
         }
@@ -1454,7 +1762,23 @@ mod platform {
         let auto_profile = Arc::new(Mutex::new(AutoProfileConfig::default()));
         let worker_auto_profile = auto_profile.clone();
 
-        std::thread::spawn(move || poll_loop(worker_shared, worker_mapping, worker_auto_profile));
+        let persisted_flags = crate::adapter::feature_flags_adapter::load(
+            &crate::adapter::feature_flags_adapter::config_path(),
+        );
+        let feature_flags = Arc::new(Mutex::new(FeatureFlagsSlot {
+            flags: persisted_flags,
+            version: 1,
+        }));
+        let worker_feature_flags = feature_flags.clone();
+
+        std::thread::spawn(move || {
+            poll_loop(
+                worker_shared,
+                worker_mapping,
+                worker_auto_profile,
+                worker_feature_flags,
+            )
+        });
 
         let (tray_events, tray) = tray_adapter::spawn("OpenDS: starting");
 
@@ -1500,6 +1824,11 @@ mod platform {
                     auto_profile_default_input: persisted.default_profile.unwrap_or_default(),
                     tray,
                     tray_events,
+                    feature_flags_local: persisted_flags,
+                    feature_flags,
+                    feature_modal: None,
+                    registered_pads: Vec::new(),
+                    pads_scanned: false,
                 };
 
                 app.load_profile(Ok(profile_adapter::default_profile()));

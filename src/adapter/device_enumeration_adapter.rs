@@ -27,6 +27,27 @@ fn classify(instance_id: &str) -> bool {
     instance_id.to_uppercase().contains(OURS_MARKER)
 }
 
+const DRIVER_LOG_PATHS: &[&str] = &[
+    "C:\\Windows\\Temp\\opends-uhid.log",
+    "C:\\Users\\Public\\opends-uhid.log",
+    "C:\\Windows\\ServiceProfiles\\LocalService\\AppData\\Local\\Temp\\opends-uhid.log",
+];
+
+const DRIVER_LOG_TAIL_LINES: usize = 60;
+
+pub fn tail_driver_log() -> String {
+    for path in DRIVER_LOG_PATHS {
+        if let Ok(text) = std::fs::read_to_string(path) {
+            let lines: Vec<&str> = text.lines().collect();
+            let start = lines.len().saturating_sub(DRIVER_LOG_TAIL_LINES);
+
+            return lines[start..].join("\n");
+        }
+    }
+
+    String::new()
+}
+
 #[cfg(windows)]
 pub use platform::{list_registered_pads, remove_pad};
 
