@@ -18,7 +18,9 @@ pub use platform::{acquire, focus_existing, InstanceLock};
 #[cfg(windows)]
 mod platform {
     use windows::core::PCWSTR;
-    use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS, HANDLE};
+    use windows::Win32::Foundation::{
+        GetLastError, SetLastError, ERROR_ALREADY_EXISTS, ERROR_SUCCESS, HANDLE,
+    };
     use windows::Win32::System::Threading::CreateMutexW;
     use windows::Win32::UI::WindowsAndMessaging::{
         FindWindowW, SetForegroundWindow, ShowWindow, SW_RESTORE,
@@ -32,7 +34,13 @@ mod platform {
     }
 
     pub fn acquire() -> Option<InstanceLock> {
-        let name = to_wide(MUTEX_NAME);
+        acquire_named(MUTEX_NAME)
+    }
+
+    fn acquire_named(mutex_name: &str) -> Option<InstanceLock> {
+        let name = to_wide(mutex_name);
+
+        unsafe { SetLastError(ERROR_SUCCESS) };
 
         let handle = unsafe { CreateMutexW(None, false, PCWSTR(name.as_ptr())) }.ok()?;
         let already_running = unsafe { GetLastError() } == ERROR_ALREADY_EXISTS;
@@ -69,10 +77,10 @@ mod platform {
 
         #[test]
         fn acquiring_the_lock_twice_in_the_same_process_only_succeeds_once() {
-            let first = acquire();
+            let first = acquire_named("Local\\OpenDS-SingleInstance-Mutex-Test");
             assert!(first.is_some());
 
-            let second = acquire();
+            let second = acquire_named("Local\\OpenDS-SingleInstance-Mutex-Test");
             assert!(second.is_none());
         }
 
