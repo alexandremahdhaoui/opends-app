@@ -258,7 +258,7 @@ mod platform {
         TriggerPreset,
     };
 
-    const WINDOW: [f32; 2] = [760.0, 740.0];
+    const WINDOW: [f32; 2] = [920.0, 740.0];
 
     #[derive(Default)]
     struct MappingSlot {
@@ -1497,47 +1497,30 @@ mod platform {
             ));
             ui.add_space(10.0);
 
-            let columns = 2;
-            let spacing = ui.spacing().item_spacing.x;
-            let card_width = ((ui.available_width() - spacing * (columns as f32 + 1.0))
-                / columns as f32)
-                .max(180.0);
             let mut changed = false;
 
-            egui::Grid::new("features_grid")
-                .num_columns(columns)
-                .spacing(egui::vec2(spacing, 8.0))
-                .show(ui, |ui| {
-                    for (index, kind) in FeatureKind::ALL.iter().enumerate() {
-                        ui.group(|ui| {
-                            ui.set_width(card_width);
+            for kind in FeatureKind::ALL {
+                egui::Frame::group(ui.style()).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(kind.name()).strong());
 
-                            ui.vertical(|ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new(kind.name()).strong());
+                        let mut enabled = kind.get(&self.feature_flags_local);
 
-                                    let mut enabled = kind.get(&self.feature_flags_local);
-
-                                    if ui.checkbox(&mut enabled, "").changed() {
-                                        kind.set(&mut self.feature_flags_local, enabled);
-                                        changed = true;
-                                    }
-                                });
-
-                                ui.label(theme::muted(kind.summary()));
-                                ui.add_space(4.0);
-
-                                if ui.small_button("Learn more").clicked() {
-                                    self.feature_modal = Some(*kind);
-                                }
-                            });
-                        });
-
-                        if (index + 1) % columns == 0 {
-                            ui.end_row();
+                        if ui.checkbox(&mut enabled, "").changed() {
+                            kind.set(&mut self.feature_flags_local, enabled);
+                            changed = true;
                         }
-                    }
+
+                        if ui.add(egui::Button::new("Learn more").small()).clicked() {
+                            self.feature_modal = Some(*kind);
+                        }
+                    });
+
+                    ui.add(egui::Label::new(theme::muted(kind.summary())).wrap());
                 });
+
+                ui.add_space(4.0);
+            }
 
             if changed {
                 self.push_feature_flags_update();
