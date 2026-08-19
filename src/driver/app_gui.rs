@@ -1436,6 +1436,11 @@ mod platform {
     }
 
     pub fn run() {
+        let Some(_instance_lock) = crate::adapter::single_instance_adapter::acquire() else {
+            crate::adapter::single_instance_adapter::focus_existing();
+            return;
+        };
+
         let shared = Arc::new(Mutex::new(GuiStatus::default()));
         let worker_shared = shared.clone();
         let mapping = Arc::new(Mutex::new(MappingSlot::default()));

@@ -23,6 +23,7 @@ pub mod kbm_adapter;
 pub mod payload_adapter;
 pub mod profile_adapter;
 pub mod setup_log_adapter;
+pub mod single_instance_adapter;
 pub mod tray_adapter;
 pub mod vpad_adapter;
 pub mod xinput_adapter;
