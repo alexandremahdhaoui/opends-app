@@ -49,7 +49,7 @@ mod app {
         human_size, Component, DriverInstaller, Selection, Step,
     };
     use opends_app::driver::setup_driver::{self, Mode};
-    use opends_app::driver::setup_gui::{Message, Phase, StepState, Wizard};
+    use opends_app::driver::setup_gui::{step_label, Message, Phase, StepState, Wizard};
     use opends_app::driver::theme;
 
     use egui::Color32;
@@ -209,7 +209,7 @@ mod app {
                 };
 
                 ui.label(
-                    egui::RichText::new(step.label())
+                    egui::RichText::new(step_label(*step, wizard.mode))
                         .size(13.0)
                         .color(Color32::from(colour)),
                 );

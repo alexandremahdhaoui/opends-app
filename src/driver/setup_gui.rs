@@ -18,6 +18,22 @@ use crate::adapter::driver_install_adapter::{Selection, Step};
 use crate::driver::setup_driver::{self, Mode};
 use crate::driver::theme;
 
+pub fn step_label(step: Step, mode: Mode) -> &'static str {
+    if mode == Mode::Install {
+        return step.label();
+    }
+
+    match step {
+        Step::CheckPackage => "Checking what is installed",
+        Step::TrustCertificate => "Removing the certificate",
+        Step::CreateDevice => "Removing the virtual device",
+        Step::InstallDriver => "Removing the driver",
+        Step::CopyFiles => "Removing files from Program Files",
+        Step::Register => "Removing the uninstaller entry",
+        Step::Done => "Done",
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StepState {
     Pending,
@@ -216,6 +232,47 @@ mod tests {
 
     fn wizard() -> Wizard {
         Wizard::new(Mode::Install)
+    }
+
+    #[test]
+    fn install_mode_uses_install_phrased_labels() {
+        assert_eq!(
+            step_label(Step::CreateDevice, Mode::Install),
+            "Creating the virtual device"
+        );
+        assert_eq!(
+            step_label(Step::InstallDriver, Mode::Install),
+            "Installing the driver"
+        );
+    }
+
+    #[test]
+    fn uninstall_mode_uses_removal_phrased_labels_not_install_ones() {
+        for step in Step::ORDER {
+            let label = step_label(*step, Mode::Uninstall);
+
+            assert!(
+                !label.to_lowercase().contains("creating")
+                    && !label.to_lowercase().contains("installing")
+                    && !label.to_lowercase().contains("copying"),
+                "{step:?} still says {label:?} during an uninstall"
+            );
+        }
+    }
+
+    #[test]
+    fn every_step_has_a_distinct_uninstall_label_from_its_install_label_except_done() {
+        for step in Step::ORDER {
+            if *step == Step::Done {
+                continue;
+            }
+
+            assert_ne!(
+                step_label(*step, Mode::Install),
+                step_label(*step, Mode::Uninstall),
+                "{step:?} did not get its own uninstall wording"
+            );
+        }
     }
 
     #[test]
