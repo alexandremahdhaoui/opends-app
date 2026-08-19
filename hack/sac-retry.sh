@@ -10,13 +10,11 @@ cd "$REPO"
 
 case "$WHICH" in
 app)
-    PREFIX="OpenDS-nogit"
     PROBE_ARGS="--list-pads"
     EXPECT="pad\(s\) found|no Sony pad found"
     TOUCH="src/bin/opends.rs"
     ;;
 setup)
-    PREFIX="OpenDS-Setup-nogit"
     PROBE_ARGS="--probe"
     EXPECT="Smart App Control allowed this build"
     TOUCH="src/bin/opends-setup.rs"
@@ -26,6 +24,14 @@ setup)
     exit 2
     ;;
 esac
+
+latest_candidate() {
+    if [ "$WHICH" = "app" ]; then
+        ls -1t "$DEST"/OpenDS-*.exe 2>/dev/null | grep -v -- '-Setup-' | head -1
+    else
+        ls -1t "$DEST"/OpenDS-Setup-*.exe 2>/dev/null | head -1
+    fi
+}
 
 allowed() {
     name="$1"
@@ -56,6 +62,7 @@ build() {
     fi
 }
 
+START_EPOCH=$(date +%s)
 attempt=1
 
 while [ "$attempt" -le "$ATTEMPTS" ]; do
@@ -67,7 +74,22 @@ while [ "$attempt" -le "$ATTEMPTS" ]; do
         exit 1
     }
 
-    name=$(basename "$(ls -1t "$DEST"/$PREFIX*.exe | head -1)")
+    candidate="$(latest_candidate)"
+
+    [ -n "$candidate" ] || {
+        echo "sac-retry: no OpenDS binary found in $DEST after a build" >&2
+        exit 1
+    }
+
+    name=$(basename "$candidate")
+    file_epoch=$(stat -c %Y "$DEST/$name" 2>/dev/null || echo 0)
+
+    if [ "$file_epoch" -lt "$((START_EPOCH - 5))" ]; then
+        echo "sac-retry: $name predates this run and was not just built." >&2
+        echo "sac-retry: the file-matching pattern found a stale binary instead" >&2
+        echo "sac-retry: of what build() just produced. Fix the pattern, do not retry." >&2
+        exit 1
+    fi
 
     printf "sac-retry: attempt %s, %s ... " "$attempt" "$name"
 
